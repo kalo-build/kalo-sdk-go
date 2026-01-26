@@ -62,7 +62,7 @@ func (s *hostDBStore) ApplyMigration(name string, sql []byte) error {
 	// Call host function to apply migration
 	errCode := hostabi.DBApplyMigration(s.storeID, name, sql)
 	if errCode != 0 {
-		return ErrHostFunctionFailed
+		return HostFunctionError("apply migration", errCode)
 	}
 
 	return nil
@@ -75,7 +75,7 @@ func (s *hostDBStore) EnsureTrackingTable() error {
 
 	errCode := hostabi.DBEnsureTrackingTable(s.storeID)
 	if errCode != 0 {
-		return ErrHostFunctionFailed
+		return HostFunctionError("ensure tracking table", errCode)
 	}
 
 	return nil
