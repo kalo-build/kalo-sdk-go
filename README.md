@@ -55,6 +55,24 @@ func main() {
 }
 ```
 
+## System Capabilities
+
+The SDK provides access to host system resources not available in standard WASI:
+
+```go
+import kalo "github.com/kalo-build/kalo-sdk-go"
+
+// Get current time (bypasses WASI clock restrictions)
+now := kalo.System.Now()           // time.Time
+unix := kalo.System.NowUnix()      // int64 (seconds)
+nanos := kalo.System.NowUnixNano() // int64 (nanoseconds)
+
+// Format for migration timestamps
+timestamp := kalo.System.Now().Format("20060102150405")
+```
+
+This is essential for plugins that need real-time clock access (e.g., generating timestamped migration files).
+
 ## Store Types
 
 The SDK automatically handles different store types:
@@ -87,11 +105,17 @@ type FileStore interface {
 
 ```go
 type DBStore interface {
-    GetAppliedMigrations() ([]AppliedMigration, error)
-    ApplyMigration(name string, sql []byte) error
-    EnsureTrackingTable() error
+    // Exec executes SQL that doesn't return rows (INSERT, UPDATE, DELETE, DDL).
+    Exec(sql []byte) error
+
+    // Query executes SQL that returns rows and returns the result as JSON bytes.
+    // The result format is an array of objects: [{"col1": val1, "col2": val2}, ...]
+    Query(sql []byte) ([]byte, error)
 }
 ```
+
+The SDK provides only generic database operations. All business logic (migrations,
+tracking, etc.) should be implemented in the plugin that uses this interface.
 
 ## Building WASM Plugins
 

@@ -1,28 +1,19 @@
 package kalo
 
 import (
-	"encoding/json"
-
 	"github.com/kalo-build/kalo-sdk-go/hostabi"
 )
 
-// DBStore provides database operations for a store.
+// DBStore provides generic database operations for a store.
+// This is a thin transport layer - all business logic (migrations, etc.)
+// should be implemented in the plugin that uses this interface.
 type DBStore interface {
-	// GetAppliedMigrations returns the list of migrations that have been applied.
-	GetAppliedMigrations() ([]AppliedMigration, error)
+	// Exec executes SQL that doesn't return rows (INSERT, UPDATE, DELETE, DDL).
+	Exec(sql []byte) error
 
-	// ApplyMigration applies a migration with the given name and SQL content.
-	ApplyMigration(name string, sql []byte) error
-
-	// EnsureTrackingTable ensures the migration tracking table exists.
-	EnsureTrackingTable() error
-}
-
-// AppliedMigration represents a migration that has been applied to the database.
-type AppliedMigration struct {
-	Name      string `json:"name"`
-	Checksum  string `json:"checksum"`
-	AppliedAt int64  `json:"appliedAt"` // Unix timestamp
+	// Query executes SQL that returns rows and returns the result as JSON bytes.
+	// The result format is an array of objects: [{"col1": val1, "col2": val2}, ...]
+	Query(sql []byte) ([]byte, error)
 }
 
 // hostDBStore implements DBStore using host function callbacks.
@@ -32,52 +23,32 @@ type hostDBStore struct {
 	err       error
 }
 
-func (s *hostDBStore) GetAppliedMigrations() ([]AppliedMigration, error) {
+func (s *hostDBStore) Exec(sql []byte) error {
+	if s.err != nil {
+		return s.err
+	}
+
+	errCode := hostabi.DBExec(s.storeID, sql)
+	if errCode != 0 {
+		return HostFunctionError("exec sql", errCode)
+	}
+
+	return nil
+}
+
+func (s *hostDBStore) Query(sql []byte) ([]byte, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
 
-	// Call host function to get migrations
-	resultPtr, resultLen := hostabi.DBGetMigrations(s.storeID)
+	resultPtr, resultLen, errCode := hostabi.DBQuery(s.storeID, sql)
+	if errCode != 0 {
+		return nil, HostFunctionError("query sql", errCode)
+	}
+
 	if resultLen == 0 {
-		return []AppliedMigration{}, nil
+		return []byte("[]"), nil
 	}
 
-	// Read result from WASM memory
-	resultBytes := hostabi.ReadMemory(resultPtr, resultLen)
-
-	var migrations []AppliedMigration
-	if err := json.Unmarshal(resultBytes, &migrations); err != nil {
-		return nil, err
-	}
-
-	return migrations, nil
+	return hostabi.ReadMemory(resultPtr, resultLen), nil
 }
-
-func (s *hostDBStore) ApplyMigration(name string, sql []byte) error {
-	if s.err != nil {
-		return s.err
-	}
-
-	// Call host function to apply migration
-	errCode := hostabi.DBApplyMigration(s.storeID, name, sql)
-	if errCode != 0 {
-		return HostFunctionError("apply migration", errCode)
-	}
-
-	return nil
-}
-
-func (s *hostDBStore) EnsureTrackingTable() error {
-	if s.err != nil {
-		return s.err
-	}
-
-	errCode := hostabi.DBEnsureTrackingTable(s.storeID)
-	if errCode != 0 {
-		return HostFunctionError("ensure tracking table", errCode)
-	}
-
-	return nil
-}
-
